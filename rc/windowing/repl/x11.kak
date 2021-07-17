@@ -4,7 +4,7 @@ hook global ModuleLoaded x11 %{
 
 provide-module x11-repl %{
 
-declare-option -docstring "window id of the REPL window" str x11_repl_id
+declare-option -docstring "id of the REPL" str x11_repl_id
 
 define-command -docstring %{
     x11-repl [<arguments>]: create a new window for repl interaction
@@ -13,11 +13,12 @@ define-command -docstring %{
     -params .. \
     -shell-completion \
     x11-repl %{ x11-terminal sh -c %{
-        winid="${WINDOWID:-$(xdotool search --pid ${PPID} | tail -1)}"
+        file="$(mktemp -u -t kak_x11_repl.XXXXX)"
+        trap 'rm -f "${file}"' EXIT
         printf "evaluate-commands -try-client $1 \
-            'set-option current x11_repl_id ${winid}'" | kak -p "$2"
-        shift 2;
-        [ "$1" ] && "$@" || "$SHELL"
+            'set-option current x11_repl_id ${file}'" | kak -p "$2"
+        shift 2
+        dtach -c "${file}" -E sh -c "${@:-$SHELL}" || "${@:-$SHELL}"
     } -- %val{client} %val{session} %arg{@}
 }
 
@@ -25,13 +26,8 @@ define-command x11-send-text -params 0..1 -docstring %{
         x11-send-text [text]: Send text to the REPL window.
         If no text is passed, then the selection is used
         } %{
-    evaluate-commands %sh{
-        ([ "$#" -gt 0 ] && printf "%s" "$1" || printf "%s" "${kak_selection}" ) | xsel -i ||
-        echo 'fail x11-send-text: failed to run xsel, see *debug* buffer for details' &&
-        kak_winid=$(xdotool getactivewindow) &&
-        xdotool windowactivate "${kak_opt_x11_repl_id}" key --clearmodifiers Shift+Insert &&
-        xdotool windowactivate "${kak_winid}" ||
-        echo 'fail x11-send-text: failed to run xdotool, see *debug* buffer for details'
+    nop %sh{
+        printf "%s" "${@:-$kak_selection}" | dtach -p "$kak_opt_x11_repl_id"
     }
 }
 
